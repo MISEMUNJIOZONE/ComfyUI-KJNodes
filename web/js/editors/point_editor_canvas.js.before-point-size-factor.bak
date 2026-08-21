@@ -10,24 +10,14 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData?.name === 'PointsEditor') {
       chainCallback(nodeType.prototype, "onNodeCreated", function () {
-        if (!this.widgets?.some(w => w.name === "point_size_factor")) {
-          const widget = this.addWidget("slider", "point_size_factor", 1.0, (value) => {
-            const safeValue = Math.max(0.1, Math.min(2.0, Number(value) || 1.0));
-            widget.value = safeValue;
-            this.editor?.render();
-            this.graph?.setDirtyCanvas(true, true);
-          }, { min: 0.1, max: 2.0, step: 0.05, precision: 2 });
-          widget.serialize = true;
-        }
-
         BaseEditorCanvas.setupNode(this, nodeData, {
           editorClass: PointsEditor,
           editorKey: 'pointsEditor',
           heightKey: 'pointsEditorHeight',
           className: 'points-editor',
           menuItems: {
-            "Load Image": { action: (ed) => ed.openImageFilePicker() },
-            "Clear Image": { action: (ed) => ed.clearBackgroundImage() },
+            "Load Image":  { action: (ed) => ed.openImageFilePicker() },
+            "Clear Image":  { action: (ed) => ed.clearBackgroundImage() },
           },
           hiddenWidgets: ["coordinates", "neg_coordinates", "bboxes"],
           initialSize: [550, 550],
@@ -53,7 +43,6 @@ class PointsEditor extends BaseEditorCanvas {
     this.heightWidget = this.findWidget("height");
     this.bboxStoreWidget = this.findWidget("bbox_store");
     this.bboxWidget = this.findWidget("bboxes");
-    this.pointSizeWidget = this.findWidget("point_size_factor");
 
     this.setupSizeCallbacks();
     this.pointsStoreWidget.callback = () => {
@@ -104,12 +93,6 @@ class PointsEditor extends BaseEditorCanvas {
     this.refreshBackgroundImage();
   }
 
-  getPointRadius() {
-    const value = Number(this.pointSizeWidget?.value);
-    const factor = Number.isFinite(value) ? Math.max(0.1, Math.min(2.0, value)) : 1.0;
-    return Math.max(2, this.pointRadius * factor);
-  }
-
   onDataChanged() { this.updateData(); }
 
   onCoordSpaceResized(oldWidth, oldHeight) {
@@ -131,7 +114,8 @@ class PointsEditor extends BaseEditorCanvas {
   // ─── Hit Testing ───
 
   findPointAt(x, y, pointsArray) {
-    const r = this.getPointRadius() / Math.max(0.000001, Math.min(this.scaleX, this.scaleY));
+    // Convert pixel radius to coord space
+    const r = this.pointRadius / Math.min(this.scaleX, this.scaleY);
     for (let i = pointsArray.length - 1; i >= 0; i--) {
       const p = pointsArray[i];
       const dx = p.x - x, dy = p.y - y;
@@ -292,6 +276,7 @@ class PointsEditor extends BaseEditorCanvas {
     const ctx = this.ctx;
     this.beginRender();
 
+    // Bounding box
     const nb = this.normBbox();
     if (nb) {
       const tl = this.toCanvas(nb.x1, nb.y1), br = this.toCanvas(nb.x2, nb.y2);
@@ -302,10 +287,12 @@ class PointsEditor extends BaseEditorCanvas {
       ctx.strokeRect(tl.x, tl.y, bw, bh);
       ctx.strokeStyle = 'steelblue'; ctx.lineWidth = 2;
       ctx.strokeRect(tl.x, tl.y, bw, bh);
+      // Center cross
       const cx = (tl.x + br.x) / 2, cy = (tl.y + br.y) / 2;
       ctx.strokeStyle = 'steelblue'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(cx - 5, cy); ctx.lineTo(cx + 5, cy);
       ctx.moveTo(cx, cy - 5); ctx.lineTo(cx, cy + 5); ctx.stroke();
+      // Corner handles
       const hs = 5;
       ctx.fillStyle = 'steelblue';
       for (const [hx, hy] of [[tl.x, tl.y], [br.x, tl.y], [tl.x, br.y], [br.x, br.y]]) {
@@ -313,28 +300,33 @@ class PointsEditor extends BaseEditorCanvas {
       }
     }
 
+    // Points
     this._badgePositions = [];
     this._drawPoints(ctx, this.points, '#139613', '#07f907', 'positive');
+    // Negative points
     this._drawPoints(ctx, this.neg_points, '#891616', '#f91111', 'negative');
 
     this.endRender();
   }
 
   _drawPoints(ctx, points, color, selectedColor, type) {
-    const r = this.getPointRadius();
+    const r = this.pointRadius;
 
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const cp = this.toCanvas(p.x, p.y);
       const isSelected = (this.dragType === type && this.dragIndex === i);
+      // Outer circle
       ctx.beginPath(); ctx.arc(cp.x, cp.y, r, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(100, 100, 100, 0.25)'; ctx.fill();
       ctx.strokeStyle = isSelected ? selectedColor : color; ctx.lineWidth = 2; ctx.stroke();
+      // Center dot
       ctx.beginPath(); ctx.arc(cp.x, cp.y, 1.5, 0, Math.PI * 2);
       ctx.fillStyle = 'red'; ctx.fill();
+      // Index badge
       const label = i.toString();
       const badgeR = label.length > 1 ? 8 : 7;
-      const off = Math.max(r * 0.7, badgeR + 2);
+      const off = r * 0.7;
       const candidates = [
         { x: cp.x + off, y: cp.y - off },
         { x: cp.x - off, y: cp.y - off },
@@ -374,4 +366,5 @@ class PointsEditor extends BaseEditorCanvas {
       this.bboxWidget.value = bboxString;
     }
   }
+
 }
